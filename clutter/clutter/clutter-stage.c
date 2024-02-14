@@ -50,7 +50,7 @@
 #include "clutter/clutter-event-private.h"
 #include "clutter/clutter-frame-clock.h"
 #include "clutter/clutter-frame.h"
-#include "clutter/clutter-grab-private.h"
+#include "clutter/clutter-grab.h"
 #include "clutter/clutter-input-device-private.h"
 #include "clutter/clutter-input-only-actor.h"
 #include "clutter/clutter-main.h"
@@ -137,6 +137,18 @@ typedef struct _ClutterStagePrivate
 
   guint actor_needs_immediate_relayout : 1;
 } ClutterStagePrivate;
+
+struct _ClutterGrab
+{
+  grefcount ref_count;
+  ClutterStage *stage;
+
+  ClutterActor *actor;
+  gboolean owns_actor;
+
+  ClutterGrab *prev;
+  ClutterGrab *next;
+};
 
 enum
 {
@@ -1615,20 +1627,12 @@ clutter_stage_class_init (ClutterStageClass *klass)
 }
 
 static void
-on_seat_unfocus_inhibited_changed (ClutterStage *stage,
-                                   ClutterSeat  *seat)
-{
-  clutter_stage_repick_device (stage, clutter_seat_get_pointer (seat));
-}
-
-static void
 clutter_stage_init (ClutterStage *self)
 {
   MtkRectangle geom = { 0, };
   ClutterStagePrivate *priv;
   ClutterStageWindow *impl;
   ClutterBackend *backend;
-  ClutterSeat *seat;
   GError *error;
 
   /* a stage is a top-level object */
@@ -1682,12 +1686,6 @@ clutter_stage_init (ClutterStage *self)
   clutter_stage_set_title (self, g_get_prgname ());
   clutter_stage_set_key_focus (self, NULL);
   clutter_stage_set_viewport (self, geom.width, geom.height);
-
-  seat = clutter_backend_get_default_seat (backend);
-  g_signal_connect_object (seat, "is-unfocus-inhibited-changed",
-                           G_CALLBACK (on_seat_unfocus_inhibited_changed),
-                           self,
-                           G_CONNECT_SWAPPED);
 }
 
 static void
@@ -3570,36 +3568,28 @@ clutter_stage_pick_and_update_device (ClutterStage             *stage,
                                       graphene_point_t          point,
                                       uint32_t                  time_ms)
 {
-  ClutterActor *new_actor = NULL;
+  ClutterActor *new_actor;
   MtkRegion *clear_area = NULL;
-  ClutterSeat *seat;
 
-  seat = clutter_input_device_get_seat (device);
-
-  if (sequence ||
-      device != clutter_seat_get_pointer (seat) ||
-      clutter_seat_is_unfocus_inhibited (seat))
+  if ((flags & CLUTTER_DEVICE_UPDATE_IGNORE_CACHE) == 0)
     {
-      if ((flags & CLUTTER_DEVICE_UPDATE_IGNORE_CACHE) == 0)
+      if (clutter_stage_check_in_clear_area (stage, device,
+                                             sequence, point))
         {
-          if (clutter_stage_check_in_clear_area (stage, device,
-                                                 sequence, point))
-            {
-              clutter_stage_set_device_coords (stage, device,
-                                               sequence, point);
-              return clutter_stage_get_device_actor (stage, device, sequence);
-            }
+          clutter_stage_set_device_coords (stage, device,
+                                           sequence, point);
+          return clutter_stage_get_device_actor (stage, device, sequence);
         }
-
-      new_actor = _clutter_stage_do_pick (stage,
-                                          point.x,
-                                          point.y,
-                                          CLUTTER_PICK_REACTIVE,
-                                          &clear_area);
-
-      /* Picking should never fail, but if it does, we bail out here */
-      g_return_val_if_fail (new_actor != NULL, NULL);
     }
+
+  new_actor = _clutter_stage_do_pick (stage,
+                                      point.x,
+                                      point.y,
+                                      CLUTTER_PICK_REACTIVE,
+                                      &clear_area);
+
+  /* Picking should never fail, but if it does, we bail out here */
+  g_return_val_if_fail (new_actor != NULL, NULL);
 
   clutter_stage_update_device (stage,
                                device, sequence,
@@ -3870,6 +3860,44 @@ clutter_stage_notify_grab (ClutterStage *stage,
   clutter_stage_notify_grab_on_key_focus (stage, cur_actor, old_actor);
 }
 
+ClutterGrab *
+clutter_grab_ref (ClutterGrab *grab)
+{
+  g_ref_count_inc (&grab->ref_count);
+  return grab;
+}
+
+void
+clutter_grab_unref (ClutterGrab *grab)
+{
+  if (g_ref_count_dec (&grab->ref_count))
+    {
+      clutter_grab_dismiss (grab);
+      g_free (grab);
+    }
+}
+
+G_DEFINE_BOXED_TYPE (ClutterGrab, clutter_grab,
+                     clutter_grab_ref, clutter_grab_unref)
+
+static ClutterGrab *
+clutter_grab_new (ClutterStage *stage,
+                  ClutterActor *actor,
+                  gboolean      owns_actor)
+{
+  ClutterGrab *grab;
+
+  grab = g_new0 (ClutterGrab, 1);
+  g_ref_count_init (&grab->ref_count);
+  grab->stage = stage;
+
+  grab->actor = actor;
+  if (owns_actor)
+    grab->owns_actor = TRUE;
+
+  return grab;
+}
+
 static ClutterGrab *
 clutter_stage_grab_full (ClutterStage *stage,
                          ClutterActor *actor,
@@ -3929,9 +3957,6 @@ clutter_stage_grab_full (ClutterStage *stage,
 
   if (was_grabbed != !!priv->topmost_grab)
     g_object_notify_by_pspec (G_OBJECT (stage), obj_props[PROP_IS_GRABBED]);
-
-  if (grab->next)
-    clutter_grab_notify (grab->next);
 
   return grab;
 }
@@ -4038,9 +4063,6 @@ clutter_stage_unlink_grab (ClutterStage *stage,
 
   if (grab->owns_actor)
     g_clear_pointer (&grab->actor, clutter_actor_destroy);
-
-  if (priv->topmost_grab)
-    clutter_grab_notify (priv->topmost_grab);
 }
 
 /**
@@ -4371,9 +4393,7 @@ clutter_stage_emit_event (ClutterStage       *self,
       }
     }
 
-  if (!target_actor)
-    return;
-
+  g_assert (target_actor != NULL);
   seat_grab_actor = priv->topmost_grab ? priv->topmost_grab->actor : CLUTTER_ACTOR (self);
 
   is_sequence_begin =

@@ -29,12 +29,11 @@
 
 #include <glib-object.h>
 
-#include "clutter-macros.h"
-#include "clutter-enums.h"
-
 #define CLUTTER_TYPE_GRAB (clutter_grab_get_type ())
+typedef struct _ClutterGrab ClutterGrab;
+
 CLUTTER_EXPORT
-G_DECLARE_FINAL_TYPE (ClutterGrab, clutter_grab, CLUTTER, GRAB, GObject)
+GType clutter_grab_get_type (void) G_GNUC_CONST;
 
 CLUTTER_EXPORT
 void clutter_grab_dismiss (ClutterGrab *grab);
@@ -43,4 +42,7 @@ CLUTTER_EXPORT
 ClutterGrabState clutter_grab_get_seat_state (ClutterGrab *grab);
 
 CLUTTER_EXPORT
-gboolean clutter_grab_is_revoked (ClutterGrab *grab);
+ClutterGrab * clutter_grab_ref (ClutterGrab *grab);
+
+CLUTTER_EXPORT
+void clutter_grab_unref (ClutterGrab *grab);

@@ -26,9 +26,6 @@
 #include "wayland/meta-wayland-tablet-seat.h"
 #include "wayland/meta-wayland-versions.h"
 
-static gboolean meta_wayland_seat_handle_event_internal (MetaWaylandSeat    *seat,
-                                                         const ClutterEvent *event);
-
 #define CAPABILITY_ENABLED(prev, cur, capability) ((cur & (capability)) && !(prev & (capability)))
 #define CAPABILITY_DISABLED(prev, cur, capability) ((prev & (capability)) && !(cur & (capability)))
 
@@ -192,79 +189,6 @@ meta_wayland_seat_devices_updated (ClutterSeat        *clutter_seat,
   meta_wayland_seat_update_capabilities (seat, clutter_seat);
 }
 
-static MetaWaylandSurface *
-default_get_focus_surface (MetaWaylandEventHandler *handler,
-                           ClutterInputDevice      *device,
-                           ClutterEventSequence    *sequence,
-                           gpointer                 user_data)
-{
-  MetaWaylandSeat *seat = user_data;
-
-  return meta_wayland_seat_get_current_surface (seat,
-                                                device,
-                                                sequence);
-}
-
-static void
-default_focus (MetaWaylandEventHandler *handler,
-               ClutterInputDevice      *device,
-               ClutterEventSequence    *sequence,
-               MetaWaylandSurface      *surface,
-               gpointer                 user_data)
-{
-  MetaWaylandSeat *seat = user_data;
-  ClutterInputCapabilities caps;
-
-  caps = clutter_input_device_get_capabilities (device);
-
-  if (caps &
-      (CLUTTER_INPUT_CAPABILITY_KEYBOARD |
-       CLUTTER_INPUT_CAPABILITY_TABLET_PAD))
-    {
-      if (meta_wayland_seat_has_keyboard (seat))
-        meta_wayland_keyboard_set_focus (seat->keyboard, surface);
-
-      meta_wayland_data_device_set_keyboard_focus (&seat->data_device);
-      meta_wayland_data_device_primary_set_keyboard_focus (&seat->primary_data_device);
-      meta_wayland_tablet_seat_set_pad_focus (seat->tablet_seat, surface);
-      meta_wayland_text_input_set_focus (seat->text_input, surface);
-    }
-
-  if (caps & CLUTTER_INPUT_CAPABILITY_TABLET_TOOL)
-    {
-      meta_wayland_tablet_seat_focus_surface (seat->tablet_seat,
-                                              device,
-                                              surface);
-    }
-
-  if (caps &
-      (CLUTTER_INPUT_CAPABILITY_POINTER |
-       CLUTTER_INPUT_CAPABILITY_TOUCHPAD |
-       CLUTTER_INPUT_CAPABILITY_TRACKBALL |
-       CLUTTER_INPUT_CAPABILITY_TRACKPOINT))
-    meta_wayland_pointer_focus_surface (seat->pointer, surface);
-}
-
-static gboolean
-default_handle_event (MetaWaylandEventHandler *handler,
-                      const ClutterEvent      *event,
-                      gpointer                 user_data)
-{
-  MetaWaylandSeat *seat = user_data;
-
-  return meta_wayland_seat_handle_event_internal (seat, event);
-}
-
-static const MetaWaylandEventInterface default_event_interface = {
-  .get_focus_surface = default_get_focus_surface,
-  .focus = default_focus,
-  .motion = default_handle_event,
-  .press = default_handle_event,
-  .release = default_handle_event,
-  .key = default_handle_event,
-  .other = default_handle_event,
-};
-
 static MetaWaylandSeat *
 meta_wayland_seat_new (MetaWaylandCompositor *compositor,
                        struct wl_display     *display)
@@ -302,14 +226,7 @@ meta_wayland_seat_new (MetaWaylandCompositor *compositor,
 
   wl_global_create (display, &wl_seat_interface, META_WL_SEAT_VERSION, seat, bind_seat);
 
-  seat->tablet_seat =
-    meta_wayland_tablet_manager_ensure_seat (compositor->tablet_manager, seat);
-
-  seat->input_handler = meta_wayland_input_new (seat);
-  seat->default_handler =
-    meta_wayland_input_attach_event_handler (seat->input_handler,
-                                             &default_event_interface,
-                                             FALSE, seat);
+  meta_wayland_tablet_manager_ensure_seat (compositor->tablet_manager, seat);
 
   return seat;
 }
@@ -325,8 +242,6 @@ void
 meta_wayland_seat_free (MetaWaylandSeat *seat)
 {
   ClutterSeat *clutter_seat;
-
-  g_clear_object (&seat->input_handler);
 
   clutter_seat = clutter_backend_get_default_seat (clutter_get_default_backend ());
   g_signal_handlers_disconnect_by_data (clutter_seat, seat);
@@ -390,40 +305,10 @@ out:
   return hardware_device && supported_device;
 }
 
-static gboolean
-is_tablet_event (MetaWaylandSeat    *seat,
-                 const ClutterEvent *event)
-{
-  ClutterInputDevice *device;
-  ClutterInputCapabilities capabilities;
-
-  device = clutter_event_get_source_device (event);
-  capabilities = clutter_input_device_get_capabilities (device);
-
-  if (capabilities & CLUTTER_INPUT_CAPABILITY_TABLET_TOOL)
-    {
-      return meta_wayland_tablet_seat_lookup_tablet (seat->tablet_seat,
-                                                     device) != NULL;
-    }
-  if (capabilities & CLUTTER_INPUT_CAPABILITY_TABLET_PAD)
-    {
-      return meta_wayland_tablet_seat_lookup_pad (seat->tablet_seat,
-                                                  device) != NULL;
-    }
-
-  return FALSE;
-}
-
 void
 meta_wayland_seat_update (MetaWaylandSeat    *seat,
                           const ClutterEvent *event)
 {
-  if (is_tablet_event (seat, event))
-    {
-      meta_wayland_tablet_seat_update (seat->tablet_seat, event);
-      return;
-    }
-
   if (!(clutter_event_get_flags (event) & CLUTTER_EVENT_FLAG_INPUT_METHOD) &&
       !event_from_supported_hardware_device (seat, event) &&
       !event_is_synthesized_crossing (event))
@@ -459,14 +344,11 @@ meta_wayland_seat_update (MetaWaylandSeat    *seat,
     }
 }
 
-static gboolean
-meta_wayland_seat_handle_event_internal (MetaWaylandSeat    *seat,
-                                         const ClutterEvent *event)
+gboolean
+meta_wayland_seat_handle_event (MetaWaylandSeat *seat,
+                                const ClutterEvent *event)
 {
   ClutterEventType event_type;
-
-  if (is_tablet_event (seat, event))
-    return meta_wayland_tablet_seat_handle_event (seat->tablet_seat, event);
 
   if (!(clutter_event_get_flags (event) & CLUTTER_EVENT_FLAG_INPUT_METHOD) &&
       !event_from_supported_hardware_device (seat, event))
@@ -531,6 +413,9 @@ void
 meta_wayland_seat_set_input_focus (MetaWaylandSeat    *seat,
                                    MetaWaylandSurface *surface)
 {
+  MetaWaylandCompositor *compositor = meta_wayland_seat_get_compositor (seat);
+  MetaWaylandTabletSeat *tablet_seat;
+
   if (seat->input_focus == surface)
     return;
 
@@ -558,7 +443,8 @@ meta_wayland_seat_set_input_focus (MetaWaylandSeat    *seat,
       meta_wayland_data_device_primary_set_keyboard_focus (&seat->primary_data_device);
     }
 
-  meta_wayland_tablet_seat_set_pad_focus (seat->tablet_seat, surface);
+  tablet_seat = meta_wayland_tablet_manager_ensure_seat (compositor->tablet_manager, seat);
+  meta_wayland_tablet_seat_set_pad_focus (tablet_seat, surface);
 
   meta_wayland_text_input_set_focus (seat->text_input, surface);
 }
@@ -573,6 +459,14 @@ meta_wayland_seat_get_grab_info (MetaWaylandSeat       *seat,
                                  float                 *x,
                                  float                 *y)
 {
+  MetaWaylandCompositor *compositor;
+  MetaWaylandTabletSeat *tablet_seat;
+  GList *tools, *l;
+
+  compositor = meta_wayland_seat_get_compositor (seat);
+  tablet_seat = meta_wayland_tablet_manager_ensure_seat (compositor->tablet_manager, seat);
+  tools = g_hash_table_get_values (tablet_seat->tools);
+
   if (meta_wayland_seat_has_touch (seat))
     {
       ClutterEventSequence *sequence;
@@ -614,16 +508,25 @@ meta_wayland_seat_get_grab_info (MetaWaylandSeat       *seat,
         }
     }
 
-  if (meta_wayland_tablet_seat_get_grab_info (seat->tablet_seat,
-                                              surface,
-                                              serial,
-                                              require_pressed,
-                                              device_out,
-                                              x, y))
+  for (l = tools; l; l = l->next)
     {
-      if (sequence_out)
-        *sequence_out = NULL;
-      return TRUE;
+      MetaWaylandTabletTool *tool = l->data;
+
+      if ((!require_pressed || tool->button_count > 0) &&
+          meta_wayland_tablet_tool_can_grab_surface (tool, surface, serial))
+        {
+          if (device_out)
+            *device_out = tool->device;
+          if (sequence_out)
+            *sequence_out = NULL;
+
+          if (x)
+            *x = tool->grab_x;
+          if (y)
+            *y = tool->grab_y;
+
+          return TRUE;
+        }
     }
 
   return FALSE;
@@ -633,10 +536,17 @@ gboolean
 meta_wayland_seat_can_popup (MetaWaylandSeat *seat,
                              uint32_t         serial)
 {
+  MetaWaylandCompositor *compositor;
+  MetaWaylandTabletSeat *tablet_seat;
+
+  compositor = meta_wayland_seat_get_compositor (seat);
+  tablet_seat =
+    meta_wayland_tablet_manager_ensure_seat (compositor->tablet_manager, seat);
+
   return (meta_wayland_pointer_can_popup (seat->pointer, serial) ||
           meta_wayland_keyboard_can_popup (seat->keyboard, serial) ||
           meta_wayland_touch_can_popup (seat->touch, serial) ||
-          meta_wayland_tablet_seat_can_popup (seat->tablet_seat, serial));
+          meta_wayland_tablet_seat_can_popup (tablet_seat, serial));
 }
 
 gboolean
@@ -664,63 +574,15 @@ meta_wayland_seat_get_compositor (MetaWaylandSeat *seat)
 }
 
 gboolean
-meta_wayland_seat_handle_event (MetaWaylandSeat *seat,
-                                const ClutterEvent *event)
+meta_wayland_seat_is_grabbed (MetaWaylandSeat *seat)
 {
-  return meta_wayland_input_handle_event (seat->input_handler, event);
-}
+  if (meta_wayland_seat_has_pointer (seat) &&
+      meta_wayland_pointer_is_grabbed (seat->pointer))
+    return TRUE;
 
-MetaWaylandInput *
-meta_wayland_seat_get_input (MetaWaylandSeat *seat)
-{
-  return seat->input_handler;
-}
+  if (meta_wayland_seat_has_keyboard (seat) &&
+      meta_wayland_keyboard_is_grabbed (seat->keyboard))
+    return TRUE;
 
-MetaWaylandSurface *
-meta_wayland_seat_get_current_surface (MetaWaylandSeat      *seat,
-                                       ClutterInputDevice   *device,
-                                       ClutterEventSequence *sequence)
-{
-  if (sequence)
-    {
-      return meta_wayland_touch_get_surface (seat->touch, sequence);
-    }
-  else
-    {
-      ClutterInputCapabilities caps;
-
-      caps = clutter_input_device_get_capabilities (device);
-
-      if (caps &
-          (CLUTTER_INPUT_CAPABILITY_KEYBOARD |
-           CLUTTER_INPUT_CAPABILITY_TABLET_PAD))
-        return seat->input_focus;
-
-      if (caps & CLUTTER_INPUT_CAPABILITY_TABLET_TOOL)
-        {
-          return meta_wayland_tablet_seat_get_current_surface (seat->tablet_seat,
-                                                               device);
-        }
-
-      if (caps &
-          (CLUTTER_INPUT_CAPABILITY_POINTER |
-           CLUTTER_INPUT_CAPABILITY_TOUCHPAD |
-           CLUTTER_INPUT_CAPABILITY_TRACKBALL |
-           CLUTTER_INPUT_CAPABILITY_TRACKPOINT))
-        {
-          MetaWaylandSurface *implicit_grab_surface;
-
-          implicit_grab_surface =
-            meta_wayland_pointer_get_implicit_grab_surface (seat->pointer);
-
-          if (implicit_grab_surface &&
-              meta_wayland_input_is_current_handler (seat->input_handler,
-                                                     seat->default_handler))
-            return implicit_grab_surface;
-          else
-            return meta_wayland_pointer_get_current_surface (seat->pointer);
-        }
-    }
-
-  return NULL;
+  return FALSE;
 }

@@ -1403,69 +1403,6 @@ set_surface_is_on_output (MetaWaylandSurface *surface,
 }
 
 static void
-surface_output_disconnect_signals (gpointer key,
-                                   gpointer value,
-                                   gpointer user_data)
-{
-  MetaWaylandOutput *wayland_output = key;
-  MetaWaylandSurface *surface = user_data;
-
-  g_signal_handlers_disconnect_by_func (wayland_output,
-                                        G_CALLBACK (handle_output_destroyed),
-                                        surface);
-
-  g_signal_handlers_disconnect_by_func (wayland_output,
-                                        G_CALLBACK (handle_output_bound),
-                                        surface);
-}
-
-static void
-get_highest_output_scale (gpointer key,
-                          gpointer value,
-                          gpointer user_data)
-{
-  MetaWaylandOutput *wayland_output = value;
-  MetaLogicalMonitor *logical_monitor;
-  double *highest_scale = user_data;
-  double scale;
-
-  logical_monitor = meta_wayland_output_get_logical_monitor (wayland_output);
-  if (!logical_monitor)
-    return;
-
-  scale = meta_logical_monitor_get_scale (logical_monitor);
-
-  if (scale > *highest_scale)
-    *highest_scale = scale;
-}
-
-double
-meta_wayland_surface_get_highest_output_scale (MetaWaylandSurface *surface)
-{
-  double scale = 0.0;
-  MetaWindow *window;
-  MetaLogicalMonitor *logical_monitor;
-
-  window = meta_wayland_surface_get_window (surface);
-  if (!window)
-    goto fallback;
-
-  logical_monitor = meta_window_get_highest_scale_monitor (window);
-  if (!logical_monitor)
-    goto fallback;
-
-  scale = meta_logical_monitor_get_scale (logical_monitor);
-  return scale;
-
-fallback:
-  g_hash_table_foreach (surface->compositor->outputs,
-                        get_highest_output_scale,
-                        &scale);
-
-  return scale;
-}
-
-static void
 update_surface_output_state (gpointer key, gpointer value, gpointer user_data)
 {
   MetaWaylandOutput *wayland_output = value;
@@ -1486,6 +1423,44 @@ update_surface_output_state (gpointer key, gpointer value, gpointer user_data)
     meta_wayland_surface_role_is_on_logical_monitor (surface->role,
                                                      logical_monitor);
   set_surface_is_on_output (surface, wayland_output, is_on_logical_monitor);
+}
+
+static void
+surface_output_disconnect_signals (gpointer key,
+                                   gpointer value,
+                                   gpointer user_data)
+{
+  MetaWaylandOutput *wayland_output = key;
+  MetaWaylandSurface *surface = user_data;
+
+  g_signal_handlers_disconnect_by_func (wayland_output,
+                                        G_CALLBACK (handle_output_destroyed),
+                                        surface);
+
+  g_signal_handlers_disconnect_by_func (wayland_output,
+                                        G_CALLBACK (handle_output_bound),
+                                        surface);
+}
+
+double
+meta_wayland_surface_get_highest_output_scale (MetaWaylandSurface *surface)
+{
+  double scale = 0.0;
+  MetaWindow *window;
+  MetaLogicalMonitor *logical_monitor;
+
+  window = meta_wayland_surface_get_window (surface);
+  if (!window)
+    goto out;
+
+  logical_monitor = meta_window_get_highest_scale_monitor (window);
+  if (!logical_monitor)
+    goto out;
+
+  scale = meta_logical_monitor_get_scale (logical_monitor);
+
+out:
+  return scale;
 }
 
 void

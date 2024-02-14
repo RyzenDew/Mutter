@@ -472,10 +472,6 @@ state_set_properties (MetaKmsConnectorState *state,
       state->broadcast_rgb.supported =
         supported_drm_broadcast_rgb_to_output_rgb_range (prop->supported_variants);
     }
-
-  prop = &props[META_KMS_CONNECTOR_PROP_VRR_CAPABLE];
-  if (prop->prop_id)
-    state->vrr_capable = prop->value;
 }
 
 static CoglSubpixelOrder
@@ -908,7 +904,6 @@ meta_kms_connector_state_new (void)
   state = g_new0 (MetaKmsConnectorState, 1);
   state->suggested_x = -1;
   state->suggested_y = -1;
-  state->vrr_capable = FALSE;
 
   return state;
 }
@@ -1084,9 +1079,6 @@ meta_kms_connector_state_changes (MetaKmsConnectorState *state,
 
   if (state->broadcast_rgb.value != new_state->broadcast_rgb.value ||
       state->broadcast_rgb.supported != new_state->broadcast_rgb.supported)
-    return META_KMS_RESOURCE_CHANGE_FULL;
-
-  if (state->vrr_capable != new_state->vrr_capable)
     return META_KMS_RESOURCE_CHANGE_FULL;
 
   if (state->privacy_screen_state != new_state->privacy_screen_state)
@@ -1441,11 +1433,6 @@ init_properties (MetaKmsConnector  *connector,
           .enum_values = prop_table->broadcast_rgb_enum,
           .num_enum_values = META_KMS_CONNECTOR_BROADCAST_RGB_N_PROPS,
           .default_value = META_KMS_CONNECTOR_BROADCAST_RGB_UNKNOWN,
-        },
-      [META_KMS_CONNECTOR_PROP_VRR_CAPABLE] =
-        {
-          .name = "vrr_capable",
-          .type = DRM_MODE_PROP_RANGE,
         },
     },
     .dpms_enum = {

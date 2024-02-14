@@ -88,7 +88,6 @@ typedef struct _MonitorTestCaseMode
   int width;
   int height;
   float refresh_rate;
-  MetaCrtcRefreshRateMode refresh_rate_mode;
   MetaCrtcModeFlag flags;
 } MonitorTestCaseMode;
 
@@ -146,7 +145,6 @@ typedef struct _MonitorTestCaseMonitorMode
   int width;
   int height;
   float refresh_rate;
-  MetaCrtcRefreshRateMode refresh_rate_mode;
   int n_scales;
   float scales[MAX_N_SCALES];
   MetaCrtcModeFlag flags;

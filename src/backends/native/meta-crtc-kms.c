@@ -422,20 +422,6 @@ meta_crtc_kms_set_mode (MetaCrtcKms   *crtc_kms,
                             kms_mode);
 }
 
-void
-meta_crtc_kms_set_vrr (MetaCrtcKms   *crtc_kms,
-                       MetaKmsUpdate *kms_update,
-                       gboolean       enabled)
-{
-  MetaKmsCrtc *kms_crtc;
-
-  kms_crtc = meta_crtc_kms_get_kms_crtc (crtc_kms);
-
-  meta_kms_update_set_vrr (kms_update,
-                           kms_crtc,
-                           enabled);
-}
-
 MetaKmsCrtc *
 meta_crtc_kms_get_kms_crtc (MetaCrtcKms *crtc_kms)
 {

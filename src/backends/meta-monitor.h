@@ -38,7 +38,6 @@ typedef struct _MetaMonitorModeSpec
   int width;
   int height;
   float refresh_rate;
-  MetaCrtcRefreshRateMode refresh_rate_mode;
   MetaCrtcModeFlag flags;
 } MetaMonitorModeSpec;
 
@@ -254,9 +253,6 @@ META_EXPORT_TEST
 float meta_monitor_mode_get_refresh_rate (MetaMonitorMode *monitor_mode);
 
 META_EXPORT_TEST
-MetaCrtcRefreshRateMode meta_monitor_mode_get_refresh_rate_mode (MetaMonitorMode *monitor_mode);
-
-META_EXPORT_TEST
 MetaCrtcModeFlag meta_monitor_mode_get_flags (MetaMonitorMode *monitor_mode);
 
 META_EXPORT_TEST
@@ -302,6 +298,9 @@ MetaPrivacyScreenState meta_monitor_get_privacy_screen_state (MetaMonitor *monit
 gboolean meta_monitor_set_privacy_screen_enabled (MetaMonitor  *monitor,
                                                   gboolean      enabled,
                                                   GError      **error);
+
+gboolean meta_monitor_get_min_refresh_rate (MetaMonitor *monitor,
+                                            int         *min_refresh_rate);
 
 META_EXPORT_TEST
 size_t meta_monitor_get_gamma_lut_size (MetaMonitor *monitor);
