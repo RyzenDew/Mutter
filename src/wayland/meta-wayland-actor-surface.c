@@ -303,7 +303,14 @@ meta_wayland_actor_surface_apply_state (MetaWaylandSurfaceRole  *surface_role,
     meta_wayland_actor_surface_get_instance_private (actor_surface);
 
   if (priv->actor && !wl_list_empty (&pending->frame_callback_list))
-    meta_surface_actor_schedule_update (priv->actor);
+    {
+      ClutterStage *stage;
+
+      stage =
+        CLUTTER_STAGE (clutter_actor_get_stage (CLUTTER_ACTOR (priv->actor)));
+      if (stage)
+        clutter_stage_schedule_update (stage);
+    }
 
   meta_wayland_actor_surface_queue_frame_callbacks (actor_surface, pending);
 

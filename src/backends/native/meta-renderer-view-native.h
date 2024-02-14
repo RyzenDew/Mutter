@@ -27,11 +27,3 @@
 #define META_TYPE_RENDERER_VIEW_NATIVE (meta_renderer_view_native_get_type ())
 G_DECLARE_FINAL_TYPE (MetaRendererViewNative, meta_renderer_view_native,
                       META, RENDERER_VIEW_NATIVE, MetaRendererView)
-
-void meta_renderer_view_native_maybe_update_frame_sync_mode (MetaRendererViewNative *view_native,
-                                                             ClutterFrame           *frame);
-
-void meta_renderer_view_native_request_frame_sync (MetaRendererViewNative *view_native,
-                                                   gboolean                enabled);
-
-gboolean meta_renderer_view_native_is_frame_sync_enabled (MetaRendererViewNative *view_native);

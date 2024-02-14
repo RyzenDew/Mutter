@@ -118,7 +118,6 @@ clutter_sources = [
   'clutter-frame-clock.c',
   'clutter-frame.c',
   'clutter-gesture-action.c',
-  'clutter-grab.c',
   'clutter-graphene.c',
   'clutter-grid-layout.c',
   'clutter-image.c',

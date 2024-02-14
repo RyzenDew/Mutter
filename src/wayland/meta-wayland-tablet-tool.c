@@ -569,6 +569,15 @@ static void
 sync_focus_surface (MetaWaylandTabletTool *tool,
                     const ClutterEvent    *event)
 {
+  MetaBackend *backend = backend_from_tool (tool);
+  ClutterStage *stage = CLUTTER_STAGE (meta_backend_get_stage (backend));
+
+  if (clutter_stage_get_grab_actor (stage))
+    {
+      meta_wayland_tablet_tool_set_focus (tool, NULL, event);
+      return;
+    }
+
   meta_wayland_tablet_tool_set_focus (tool, tool->current, event);
 }
 
@@ -927,24 +936,4 @@ meta_wayland_tablet_tool_can_popup (MetaWaylandTabletTool *tool,
                                     uint32_t               serial)
 {
   return tool->down_serial == serial || tool->button_serial == serial;
-}
-
-gboolean
-meta_wayland_tablet_tool_has_current_tablet (MetaWaylandTabletTool *tool,
-                                             MetaWaylandTablet     *tablet)
-{
-  return tool->current_tablet == tablet;
-}
-
-MetaWaylandSurface *
-meta_wayland_tablet_tool_get_current_surface (MetaWaylandTabletTool *tool)
-{
-  return tool->current;
-}
-
-void
-meta_wayland_tablet_tool_focus_surface (MetaWaylandTabletTool *tool,
-                                        MetaWaylandSurface    *surface)
-{
-  meta_wayland_tablet_tool_set_focus (tool, surface, NULL);
 }

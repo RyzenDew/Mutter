@@ -31,8 +31,6 @@
 #define DEADLINE_EVASION_US 800
 #define DEADLINE_EVASION_WITH_KMS_TOPIC_US 1000
 
-#define MINIMUM_REFRESH_RATE 30.f
-
 typedef struct _MetaKmsCrtcPropTable
 {
   MetaKmsProp props[META_KMS_CRTC_N_PROPS];
@@ -226,9 +224,6 @@ meta_kms_crtc_state_changes (MetaKmsCrtcState *state,
   if (!meta_drm_mode_equal (&state->drm_mode, &other_state->drm_mode))
     return META_KMS_RESOURCE_CHANGE_FULL;
 
-  if (state->vrr_enabled != other_state->vrr_enabled)
-    return META_KMS_RESOURCE_CHANGE_FULL;
-
   if (!gamma_equal (state, other_state))
     return META_KMS_RESOURCE_CHANGE_GAMMA;
 
@@ -268,10 +263,6 @@ meta_kms_crtc_read_state (MetaKmsCrtc             *crtc,
     crtc_state.is_active = !!active_prop->value;
   else
     crtc_state.is_active = drm_crtc->mode_valid;
-
-  active_prop = &crtc->prop_table.props[META_KMS_CRTC_PROP_VRR_ENABLED];
-  if (active_prop->prop_id)
-    crtc_state.vrr_enabled = active_prop->value;
 
   read_gamma_state (crtc, &crtc_state, impl_device, drm_crtc);
 
@@ -349,7 +340,6 @@ meta_kms_crtc_predict_state_in_impl (MetaKmsCrtc   *crtc,
                                      MetaKmsUpdate *update)
 {
   GList *mode_sets;
-  GList *crtc_updates;
   GList *crtc_color_updates;
   GList *l;
 
@@ -383,20 +373,6 @@ meta_kms_crtc_predict_state_in_impl (MetaKmsCrtc   *crtc,
           crtc->current_state.is_drm_mode_valid = FALSE;
           crtc->current_state.drm_mode = (drmModeModeInfo) { 0 };
         }
-
-      break;
-    }
-
-  crtc_updates = meta_kms_update_get_crtc_updates (update);
-  for (l = crtc_updates; l; l = l->next)
-    {
-      MetaKmsCrtcUpdate *crtc_update = l->data;
-
-      if (crtc_update->crtc != crtc)
-        continue;
-
-      if (crtc_update->vrr.has_update)
-        crtc->current_state.vrr_enabled = crtc_update->vrr.is_enabled;
 
       break;
     }
@@ -449,11 +425,6 @@ init_properties (MetaKmsCrtc       *crtc,
       [META_KMS_CRTC_PROP_GAMMA_LUT_SIZE] =
         {
           .name = "GAMMA_LUT_SIZE",
-          .type = DRM_MODE_PROP_RANGE,
-        },
-      [META_KMS_CRTC_PROP_VRR_ENABLED] =
-        {
-          .name = "VRR_ENABLED",
           .type = DRM_MODE_PROP_RANGE,
         },
     }
@@ -549,6 +520,9 @@ meta_kms_crtc_determine_deadline (MetaKmsCrtc  *crtc,
   int ret;
   int64_t next_presentation_us;
   int64_t next_deadline_us;
+  drmModeModeInfo *drm_mode;
+  int64_t vblank_duration_us;
+  int64_t deadline_evasion_us;
 
   if (!crtc->current_state.is_drm_mode_valid)
     {
@@ -574,45 +548,30 @@ meta_kms_crtc_determine_deadline (MetaKmsCrtc  *crtc,
       return FALSE;
     }
 
-  if (crtc->current_state.vrr_enabled)
-    {
-      next_presentation_us = 0;
-      next_deadline_us =
-        s2us (vblank.reply.tval_sec) + vblank.reply.tval_usec + 0.5 +
-        G_USEC_PER_SEC / MINIMUM_REFRESH_RATE;
-    }
+  drm_mode = &crtc->current_state.drm_mode;
+  next_presentation_us =
+    s2us (vblank.reply.tval_sec) + vblank.reply.tval_usec + 0.5 +
+    G_USEC_PER_SEC / meta_calculate_drm_mode_refresh_rate (drm_mode);
+
+  /*
+   *                         1
+   * time per pixel = -----------------
+   *                   Pixel clock (Hz)
+   *
+   * number of pixels = vdisplay * htotal
+   *
+   * time spent scanning out = time per pixel * number of pixels
+   *
+   */
+
+  if (meta_is_topic_enabled (META_DEBUG_KMS))
+    deadline_evasion_us = DEADLINE_EVASION_WITH_KMS_TOPIC_US;
   else
-    {
-      drmModeModeInfo *drm_mode;
-      int64_t vblank_duration_us;
-      int64_t deadline_evasion_us;
+    deadline_evasion_us = DEADLINE_EVASION_US;
 
-      drm_mode = &crtc->current_state.drm_mode;
-
-      next_presentation_us =
-        s2us (vblank.reply.tval_sec) + vblank.reply.tval_usec + 0.5 +
-        G_USEC_PER_SEC / meta_calculate_drm_mode_refresh_rate (drm_mode);
-
-      /*
-       *                         1
-       * time per pixel = -----------------
-       *                   Pixel clock (Hz)
-       *
-       * number of pixels = vdisplay * htotal
-       *
-       * time spent scanning out = time per pixel * number of pixels
-       *
-       */
-
-      if (meta_is_topic_enabled (META_DEBUG_KMS))
-        deadline_evasion_us = DEADLINE_EVASION_WITH_KMS_TOPIC_US;
-      else
-        deadline_evasion_us = DEADLINE_EVASION_US;
-
-      vblank_duration_us = meta_calculate_drm_mode_vblank_duration_us (drm_mode);
-      next_deadline_us = next_presentation_us - (vblank_duration_us +
-                                                 deadline_evasion_us);
-    }
+  vblank_duration_us = meta_calculate_drm_mode_vblank_duration_us (drm_mode);
+  next_deadline_us = next_presentation_us - (vblank_duration_us +
+                                             deadline_evasion_us);
 
   *out_next_presentation_us = next_presentation_us;
   *out_next_deadline_us = next_deadline_us;

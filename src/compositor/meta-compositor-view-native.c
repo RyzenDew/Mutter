@@ -1,8 +1,7 @@
 /* -*- mode: C; c-file-style: "gnu"; indent-tabs-mode: nil; -*- */
 
 /*
- * Copyright (C) 2022-2023 Dor Askayo
- * Copyright (C) 2024 GNOME Foundation Inc.
+ * Copyright (C) 2022 Dor Askayo
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -27,19 +26,13 @@
 
 #include "backends/meta-crtc.h"
 #include "backends/native/meta-crtc-kms.h"
-#include "backends/native/meta-renderer-view-native.h"
-#include "clutter/clutter.h"
 #include "compositor/compositor-private.h"
 #include "compositor/meta-window-actor-private.h"
-#include "core/window-private.h"
 
 #ifdef HAVE_WAYLAND
 #include "compositor/meta-surface-actor-wayland.h"
 #include "wayland/meta-wayland-surface-private.h"
 #endif /* HAVE_WAYLAND */
-
-static void update_frame_sync_surface (MetaCompositorViewNative *view_native,
-                                       MetaSurfaceActor         *surface_actor);
 
 struct _MetaCompositorViewNative
 {
@@ -48,67 +41,10 @@ struct _MetaCompositorViewNative
 #ifdef HAVE_WAYLAND
   MetaWaylandSurface *scanout_candidate;
 #endif /* HAVE_WAYLAND */
-
-  MetaSurfaceActor *frame_sync_surface;
-
-  gulong frame_sync_surface_repaint_scheduled_id;
-  gulong frame_sync_surface_update_scheduled_id;
-  gulong frame_sync_surface_frozen_id;
-  gulong frame_sync_surface_destroy_id;
 };
 
 G_DEFINE_TYPE (MetaCompositorViewNative, meta_compositor_view_native,
                META_TYPE_COMPOSITOR_VIEW)
-
-static void
-maybe_schedule_update_now (MetaCompositorViewNative *view_native)
-{
-  MetaCompositorView *compositor_view = META_COMPOSITOR_VIEW (view_native);
-  ClutterStageView *stage_view;
-  MetaRendererViewNative *renderer_view_native;
-
-  stage_view = meta_compositor_view_get_stage_view (compositor_view);
-  renderer_view_native = META_RENDERER_VIEW_NATIVE (stage_view);
-
-  if (meta_renderer_view_native_is_frame_sync_enabled (renderer_view_native))
-    {
-      ClutterFrameClock *frame_clock;
-
-      frame_clock = clutter_stage_view_get_frame_clock (stage_view);
-      if (!frame_clock)
-        return;
-
-      clutter_frame_clock_schedule_update_now (frame_clock);
-    }
-}
-
-static void
-on_frame_sync_surface_repaint_scheduled (MetaSurfaceActor         *surface_actor,
-                                         MetaCompositorViewNative *view_native)
-{
-  maybe_schedule_update_now (view_native);
-}
-
-static void
-on_frame_sync_surface_update_scheduled (MetaSurfaceActor         *surface_actor,
-                                        MetaCompositorViewNative *view_native)
-{
-  maybe_schedule_update_now (view_native);
-}
-
-static void
-on_frame_sync_surface_frozen (MetaSurfaceActor         *surface_actor,
-                              MetaCompositorViewNative *view_native)
-{
-  update_frame_sync_surface (view_native, NULL);
-}
-
-static void
-on_frame_sync_surface_destroyed (MetaSurfaceActor         *surface_actor,
-                                 MetaCompositorViewNative *view_native)
-{
-  update_frame_sync_surface (view_native, NULL);
-}
 
 #ifdef HAVE_WAYLAND
 static void
@@ -351,157 +287,6 @@ meta_compositor_view_native_maybe_assign_scanout (MetaCompositorViewNative *view
 }
 #endif /* HAVE_WAYLAND */
 
-static MetaSurfaceActor *
-find_frame_sync_candidate (MetaCompositorView *compositor_view,
-                           MetaCompositor     *compositor)
-{
-  MetaWindowActor *window_actor;
-  MetaWindow *window;
-  ClutterStageView *stage_view;
-  MtkRectangle view_layout;
-  MetaSurfaceActor *surface_actor;
-
-  if (meta_compositor_is_unredirect_inhibited (compositor))
-    {
-      meta_topic (META_DEBUG_RENDER,
-                  "No frame sync candidate: unredirect inhibited");
-      return NULL;
-    }
-
-  window_actor =
-    meta_compositor_view_get_top_window_actor (compositor_view);
-  if (!window_actor)
-    {
-      meta_topic (META_DEBUG_RENDER,
-                  "No frame sync candidate: no top window actor");
-      return NULL;
-    }
-
-  if (meta_window_actor_is_frozen (window_actor))
-    {
-      meta_topic (META_DEBUG_RENDER,
-                  "No frame sync candidate: window-actor is frozen");
-      return NULL;
-    }
-
-  if (meta_window_actor_effect_in_progress (window_actor))
-    {
-      meta_topic (META_DEBUG_RENDER,
-                  "No frame sync candidate: window-actor effects in progress");
-      return NULL;
-    }
-
-  if (clutter_actor_has_transitions (CLUTTER_ACTOR (window_actor)))
-    {
-      meta_topic (META_DEBUG_RENDER,
-                  "No frame sync candidate: window-actor has transition");
-      return NULL;
-    }
-
-  window = meta_window_actor_get_meta_window (window_actor);
-  if (!window)
-    {
-      meta_topic (META_DEBUG_RENDER,
-                  "No frame sync candidate: no meta-window");
-      return NULL;
-    }
-
-  stage_view = meta_compositor_view_get_stage_view (compositor_view);
-
-  clutter_stage_view_get_layout (stage_view, &view_layout);
-
-  if (!meta_window_frame_contains_rect (window, &view_layout))
-    {
-      meta_topic (META_DEBUG_RENDER,
-                  "No frame sync candidate: stage-view layout not covered "
-                  "by meta-window frame");
-      return NULL;
-    }
-
-  surface_actor = meta_window_actor_get_scanout_candidate (window_actor);
-  if (!surface_actor)
-    {
-      meta_topic (META_DEBUG_RENDER,
-                  "No frame sync candidate: window-actor has no scanout candidate");
-      return NULL;
-    }
-
-  if (!meta_surface_actor_contains_rect (surface_actor,
-                                         &view_layout))
-    {
-      meta_topic (META_DEBUG_RENDER,
-                  "No frame sync candidate: stage-view layout not covered "
-                  "by surface-actor");
-      return NULL;
-    }
-
-  return surface_actor;
-}
-
-static void
-update_frame_sync_surface (MetaCompositorViewNative *view_native,
-                           MetaSurfaceActor         *surface_actor)
-{
-  MetaCompositorView *compositor_view =
-    META_COMPOSITOR_VIEW (view_native);
-  ClutterStageView *stage_view;
-  MetaRendererViewNative *renderer_view_native;
-
-  g_clear_signal_handler (&view_native->frame_sync_surface_repaint_scheduled_id,
-                          view_native->frame_sync_surface);
-  g_clear_signal_handler (&view_native->frame_sync_surface_update_scheduled_id,
-                          view_native->frame_sync_surface);
-  g_clear_signal_handler (&view_native->frame_sync_surface_frozen_id,
-                          view_native->frame_sync_surface);
-  g_clear_signal_handler (&view_native->frame_sync_surface_destroy_id,
-                          view_native->frame_sync_surface);
-
-  if (surface_actor)
-    {
-      view_native->frame_sync_surface_repaint_scheduled_id =
-        g_signal_connect (surface_actor, "repaint-scheduled",
-                          G_CALLBACK (on_frame_sync_surface_repaint_scheduled),
-                          view_native);
-      view_native->frame_sync_surface_update_scheduled_id =
-        g_signal_connect (surface_actor, "update-scheduled",
-                          G_CALLBACK (on_frame_sync_surface_update_scheduled),
-                          view_native);
-      view_native->frame_sync_surface_frozen_id =
-        g_signal_connect (surface_actor, "frozen",
-                          G_CALLBACK (on_frame_sync_surface_frozen),
-                          view_native);
-      view_native->frame_sync_surface_destroy_id =
-        g_signal_connect (surface_actor, "destroy",
-                          G_CALLBACK (on_frame_sync_surface_destroyed),
-                          view_native);
-    }
-
-  view_native->frame_sync_surface = surface_actor;
-
-  stage_view = meta_compositor_view_get_stage_view (compositor_view);
-  renderer_view_native = META_RENDERER_VIEW_NATIVE (stage_view);
-
-  meta_renderer_view_native_request_frame_sync (renderer_view_native,
-                                                surface_actor != NULL);
-}
-
-void
-meta_compositor_view_native_maybe_update_frame_sync_surface (MetaCompositorViewNative *view_native,
-                                                             MetaCompositor           *compositor)
-{
-  MetaCompositorView *compositor_view = META_COMPOSITOR_VIEW (view_native);
-  MetaSurfaceActor *surface_actor;
-
-  surface_actor = find_frame_sync_candidate (compositor_view,
-                                             compositor);
-
-  if (G_LIKELY (surface_actor == view_native->frame_sync_surface))
-    return;
-
-  update_frame_sync_surface (view_native,
-                             surface_actor);
-}
-
 MetaCompositorViewNative *
 meta_compositor_view_native_new (ClutterStageView *stage_view)
 {
@@ -510,27 +295,6 @@ meta_compositor_view_native_new (ClutterStageView *stage_view)
   return g_object_new (META_TYPE_COMPOSITOR_VIEW_NATIVE,
                        "stage-view", stage_view,
                        NULL);
-}
-
-static void
-meta_compositor_view_native_dispose (GObject *object)
-{
-  MetaCompositorViewNative *view_native = META_COMPOSITOR_VIEW_NATIVE (object);
-
-  if (view_native->frame_sync_surface)
-    {
-      g_clear_signal_handler (&view_native->frame_sync_surface_repaint_scheduled_id,
-                              view_native->frame_sync_surface);
-      g_clear_signal_handler (&view_native->frame_sync_surface_update_scheduled_id,
-                              view_native->frame_sync_surface);
-      g_clear_signal_handler (&view_native->frame_sync_surface_destroy_id,
-                              view_native->frame_sync_surface);
-      g_clear_signal_handler (&view_native->frame_sync_surface_frozen_id,
-                              view_native->frame_sync_surface);
-      view_native->frame_sync_surface = NULL;
-    }
-
-  G_OBJECT_CLASS (meta_compositor_view_native_parent_class)->dispose (object);
 }
 
 static void
@@ -550,7 +314,6 @@ meta_compositor_view_native_class_init (MetaCompositorViewNativeClass *klass)
 {
   GObjectClass *object_class = G_OBJECT_CLASS (klass);
 
-  object_class->dispose = meta_compositor_view_native_dispose;
   object_class->finalize = meta_compositor_view_native_finalize;
 }
 

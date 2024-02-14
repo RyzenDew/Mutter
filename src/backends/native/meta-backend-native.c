@@ -400,15 +400,13 @@ meta_backend_native_set_pointer_constraint (MetaBackend           *backend,
 
   if (constraint)
     {
-      graphene_point_t origin;
       double min_edge_distance;
 
-      region = meta_pointer_constraint_get_region (constraint, &origin);
+      region = meta_pointer_constraint_get_region (constraint);
       min_edge_distance =
         meta_pointer_constraint_get_min_edge_distance (constraint);
       constraint_impl = meta_pointer_constraint_impl_native_new (constraint,
                                                                  region,
-                                                                 origin,
                                                                  min_edge_distance);
     }
 
@@ -579,9 +577,6 @@ add_drm_device (MetaBackendNative  *backend_native,
 
   if (meta_is_udev_device_disable_modifiers (device))
     flags |= META_KMS_DEVICE_FLAG_DISABLE_MODIFIERS;
-
-  if (meta_is_udev_device_disable_vrr (device))
-    flags |= META_KMS_DEVICE_FLAG_DISABLE_VRR;
 
   if (meta_is_udev_device_preferred_primary (device))
     flags |= META_KMS_DEVICE_FLAG_PREFERRED_PRIMARY;

@@ -1934,8 +1934,6 @@ meta_seat_x11_grab (ClutterSeat *seat,
 
   seat_x11->grab_state = state;
 
-  meta_backend_x11_sync_pointer (META_BACKEND_X11 (backend));
-
   return state;
 }
 
@@ -1961,8 +1959,6 @@ meta_seat_x11_ungrab (ClutterSeat *seat,
     }
 
   seat_x11->grab_state = CLUTTER_GRAB_STATE_NONE;
-
-  meta_backend_x11_sync_pointer (META_BACKEND_X11 (backend));
 }
 
 static void

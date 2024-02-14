@@ -34,8 +34,6 @@ typedef struct _MetaKmsCrtcState
   gboolean is_drm_mode_valid;
   drmModeModeInfo drm_mode;
 
-  gboolean vrr_enabled;
-
   struct {
     MetaGammaLut *value;
     int size;
