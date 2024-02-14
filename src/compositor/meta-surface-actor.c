@@ -61,7 +61,9 @@ G_DEFINE_ABSTRACT_TYPE_WITH_CODE (MetaSurfaceActor, meta_surface_actor, CLUTTER_
 enum
 {
   REPAINT_SCHEDULED,
+  UPDATE_SCHEDULED,
   SIZE_CHANGED,
+  FROZEN,
 
   LAST_SIGNAL,
 };
@@ -285,12 +287,27 @@ meta_surface_actor_class_init (MetaSurfaceActorClass *klass)
                                              NULL, NULL, NULL,
                                              G_TYPE_NONE, 0);
 
+  signals[UPDATE_SCHEDULED] = g_signal_new ("update-scheduled",
+                                            G_TYPE_FROM_CLASS (object_class),
+                                            G_SIGNAL_RUN_LAST,
+                                            0,
+                                            NULL, NULL, NULL,
+                                            G_TYPE_NONE, 0);
+
+
   signals[SIZE_CHANGED] = g_signal_new ("size-changed",
                                         G_TYPE_FROM_CLASS (object_class),
                                         G_SIGNAL_RUN_LAST,
                                         0,
                                         NULL, NULL, NULL,
                                         G_TYPE_NONE, 0);
+
+  signals[FROZEN] = g_signal_new ("frozen",
+                                  G_TYPE_FROM_CLASS (object_class),
+                                  G_SIGNAL_RUN_LAST,
+                                  0,
+                                  NULL, NULL, NULL,
+                                  G_TYPE_NONE, 0);
 }
 
 gboolean
@@ -383,6 +400,17 @@ meta_surface_actor_get_texture (MetaSurfaceActor *self)
     meta_surface_actor_get_instance_private (self);
 
   return priv->texture;
+}
+
+void
+meta_surface_actor_schedule_update (MetaSurfaceActor *self)
+{
+  ClutterStage *stage =
+    CLUTTER_STAGE (clutter_actor_get_stage (CLUTTER_ACTOR (self)));
+
+  clutter_stage_schedule_update (stage);
+
+  g_signal_emit (self, signals[UPDATE_SCHEDULED], 0);
 }
 
 void
@@ -529,6 +557,22 @@ meta_surface_actor_is_obscured_on_stage_view (MetaSurfaceActor *self,
                                                       stage_view);
 }
 
+gboolean
+meta_surface_actor_contains_rect (MetaSurfaceActor *surface_actor,
+                                  MtkRectangle     *rect)
+{
+  ClutterActor *actor = CLUTTER_ACTOR (surface_actor);
+  graphene_rect_t bounding_rect;
+  graphene_rect_t bound_rect;
+
+  clutter_actor_get_transformed_extents (actor, &bounding_rect);
+
+  bound_rect = mtk_rectangle_to_graphene_rect (rect);
+
+  return graphene_rect_contains_rect (&bounding_rect,
+                                      &bound_rect);
+}
+
 void
 meta_surface_actor_set_input_region (MetaSurfaceActor *self,
                                      MtkRegion        *region)
@@ -611,6 +655,9 @@ meta_surface_actor_set_frozen (MetaSurfaceActor *self,
     return;
 
   priv->frozen = frozen;
+
+  if (frozen)
+    g_signal_emit (self, signals[FROZEN], 0);
 
   if (!frozen && priv->pending_damage)
     {

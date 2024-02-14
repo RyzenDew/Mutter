@@ -44,6 +44,7 @@ gboolean meta_gpu_kms_is_crtc_active (MetaGpuKms *gpu_kms,
 
 gboolean meta_gpu_kms_is_boot_vga (MetaGpuKms *gpu_kms);
 gboolean meta_gpu_kms_is_platform_device (MetaGpuKms *gpu_kms);
+gboolean meta_gpu_kms_disable_vrr (MetaGpuKms *gpu_kms);
 
 MetaKmsDevice * meta_gpu_kms_get_kms_device (MetaGpuKms *gpu_kms);
 
@@ -55,8 +56,9 @@ void meta_gpu_kms_set_power_save_mode (MetaGpuKms    *gpu_kms,
                                        uint64_t       state,
                                        MetaKmsUpdate *kms_update);
 
-MetaCrtcMode * meta_gpu_kms_get_mode_from_kms_mode (MetaGpuKms  *gpu_kms,
-                                                    MetaKmsMode *kms_mode);
+MetaCrtcMode * meta_gpu_kms_get_mode_from_kms_mode (MetaGpuKms              *gpu_kms,
+                                                    MetaKmsMode             *kms_mode,
+                                                    MetaCrtcRefreshRateMode  refresh_rate_mode);
 
 MetaGpuKmsFlipClosureContainer * meta_gpu_kms_wrap_flip_closure (MetaGpuKms *gpu_kms,
                                                                  MetaCrtc   *crtc,

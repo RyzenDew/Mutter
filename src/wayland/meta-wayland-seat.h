@@ -24,6 +24,7 @@
 #include "clutter/clutter.h"
 #include "wayland/meta-wayland-data-device.h"
 #include "wayland/meta-wayland-data-device-primary.h"
+#include "wayland/meta-wayland-input.h"
 #include "wayland/meta-wayland-input-device.h"
 #include "wayland/meta-wayland-keyboard.h"
 #include "wayland/meta-wayland-pointer.h"
@@ -42,11 +43,15 @@ struct _MetaWaylandSeat
   MetaWaylandPointer *pointer;
   MetaWaylandKeyboard *keyboard;
   MetaWaylandTouch *touch;
+  MetaWaylandTabletSeat *tablet_seat;
 
   MetaWaylandDataDevice data_device;
   MetaWaylandDataDevicePrimary primary_data_device;
 
   MetaWaylandTextInput *text_input;
+
+  MetaWaylandInput *input_handler;
+  MetaWaylandEventHandler *default_handler;
 
   MetaWaylandSurface *input_focus;
   gulong input_focus_destroy_id;
@@ -86,4 +91,8 @@ gboolean meta_wayland_seat_has_touch (MetaWaylandSeat *seat);
 
 MetaWaylandCompositor * meta_wayland_seat_get_compositor (MetaWaylandSeat *seat);
 
-gboolean meta_wayland_seat_is_grabbed (MetaWaylandSeat *seat);
+MetaWaylandInput * meta_wayland_seat_get_input (MetaWaylandSeat *seat);
+
+MetaWaylandSurface * meta_wayland_seat_get_current_surface (MetaWaylandSeat      *seat,
+                                                            ClutterInputDevice   *device,
+                                                            ClutterEventSequence *sequence);

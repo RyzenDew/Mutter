@@ -74,6 +74,8 @@ typedef struct _MetaKmsConnectorState
     MetaOutputRGBRange value;
     uint64_t supported;
   } broadcast_rgb;
+
+  gboolean vrr_capable;
 } MetaKmsConnectorState;
 
 META_EXPORT_TEST

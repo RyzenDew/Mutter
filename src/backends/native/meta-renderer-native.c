@@ -1583,8 +1583,11 @@ meta_renderer_native_before_redraw (MetaRendererNative *renderer_native,
   if (COGL_IS_ONSCREEN (framebuffer))
     {
       CoglOnscreen *onscreen = COGL_ONSCREEN (framebuffer);
+      MetaRendererViewNative *view_native = META_RENDERER_VIEW_NATIVE (view);
 
       meta_onscreen_native_before_redraw (onscreen, frame);
+      meta_renderer_view_native_maybe_update_frame_sync_mode (view_native,
+                                                              frame);
     }
 }
 

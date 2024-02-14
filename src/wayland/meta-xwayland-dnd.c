@@ -67,6 +67,17 @@ struct _MetaXWaylandDnd
   int current_dnd_window;
 };
 
+typedef struct _DndCandidateDevice DndCandidateDevice;
+
+struct _DndCandidateDevice
+{
+  MetaWaylandSeat *seat;
+  ClutterInputDevice *device;
+  ClutterEventSequence *sequence;
+  MetaWaylandSurface *focus;
+  graphene_point_t pos;
+};
+
 enum
 {
   ATOM_DND_SELECTION,
@@ -669,10 +680,15 @@ meta_x11_drag_dest_update (MetaWaylandDataDevice *data_device,
   MetaWaylandSeat *seat = meta_wayland_data_device_get_seat (data_device);
   MetaWaylandCompositor *compositor = meta_wayland_seat_get_compositor (seat);
   MetaXWaylandDnd *dnd = compositor->xwayland_manager.dnd;
+  MetaWaylandDragGrab *drag_grab = compositor->seat->data_device.current_grab;
+  ClutterInputDevice *device;
+  ClutterEventSequence *sequence;
   graphene_point_t pos;
 
-  clutter_seat_query_state (clutter_input_device_get_seat (seat->pointer->device),
-                            seat->pointer->device, NULL, &pos, NULL);
+  device = meta_wayland_drag_grab_get_device (drag_grab, &sequence);
+
+  clutter_seat_query_state (clutter_input_device_get_seat (device),
+                            device, sequence, &pos, NULL);
   xdnd_send_position (dnd, dnd->dnd_dest,
                       clutter_get_current_event_time (),
                       pos.x, pos.y);
@@ -820,55 +836,116 @@ repick_drop_surface (MetaWaylandCompositor *compositor,
     }
 }
 
-static void
-drag_xgrab_focus (MetaWaylandPointerGrab *grab,
-                  MetaWaylandSurface     *surface)
+static MetaWaylandSurface *
+drag_xgrab_get_focus_surface (MetaWaylandEventHandler *handler,
+                              ClutterInputDevice      *device,
+                              ClutterEventSequence    *sequence,
+                              gpointer                 user_data)
 {
-  /* Do not update the focus here. First, the surface may perfectly
+  ClutterSeat *clutter_seat;
+
+  clutter_seat = clutter_input_device_get_seat (device);
+  if (sequence ||
+      device != clutter_seat_get_pointer (clutter_seat))
+    return NULL;
+
+  return meta_wayland_event_handler_chain_up_get_focus_surface (handler,
+                                                                device,
+                                                                sequence);
+}
+
+static void
+drag_xgrab_focus (MetaWaylandEventHandler *handler,
+                  ClutterInputDevice      *device,
+                  ClutterEventSequence    *sequence,
+                  MetaWaylandSurface      *surface,
+                  gpointer                 user_data)
+{
+  meta_wayland_event_handler_chain_up_focus (handler, device,
+                                             sequence, surface);
+
+  /* Do not update the DnD focus here. First, the surface may perfectly
    * be the X11 source DnD icon window's, so we can only be fooled
    * here. Second, delaying focus handling to XdndEnter/Leave
    * makes us do the negotiation orderly on the X11 side.
    */
 }
 
-static void
-drag_xgrab_motion (MetaWaylandPointerGrab *grab,
-                   const ClutterEvent     *event)
+static gboolean
+drag_xgrab_motion (MetaWaylandEventHandler *handler,
+                   const ClutterEvent      *event,
+                   gpointer                 user_data)
 {
-  MetaWaylandSeat *seat = meta_wayland_pointer_get_seat (grab->pointer);
+  MetaWaylandDragGrab *drag_grab = user_data;
+  MetaWaylandSeat *seat = meta_wayland_drag_grab_get_seat (drag_grab);
   MetaWaylandCompositor *compositor = meta_wayland_seat_get_compositor (seat);
   MetaXWaylandDnd *dnd = compositor->xwayland_manager.dnd;
 
-  repick_drop_surface (compositor,
-                       (MetaWaylandDragGrab *) grab,
-                       event);
+  if (clutter_event_type (event) != CLUTTER_MOTION ||
+      clutter_event_get_device_tool (event))
+    return CLUTTER_EVENT_STOP;
+
+  repick_drop_surface (compositor, drag_grab, event);
 
   dnd->last_motion_time = clutter_event_get_time (event);
-  meta_wayland_pointer_send_motion (seat->pointer, event);
+
+  return CLUTTER_EVENT_PROPAGATE;
 }
 
-static void
-drag_xgrab_button (MetaWaylandPointerGrab *grab,
-                   const ClutterEvent     *event)
+static gboolean
+drag_xgrab_release (MetaWaylandEventHandler *handler,
+                    const ClutterEvent      *event,
+                    gpointer                 user_data)
 {
-  MetaWaylandSeat *seat = meta_wayland_pointer_get_seat (grab->pointer);
+  MetaWaylandDragGrab *drag_grab = user_data;
+  MetaWaylandSeat *seat = meta_wayland_drag_grab_get_seat (drag_grab);
   MetaWaylandCompositor *compositor = meta_wayland_seat_get_compositor (seat);
   MetaWaylandDataSource *data_source;
 
-  meta_wayland_pointer_send_button (seat->pointer, event);
+  if (clutter_event_type (event) != CLUTTER_BUTTON_RELEASE ||
+      clutter_event_get_device_tool (event))
+    return CLUTTER_EVENT_STOP;
+
   data_source = compositor->seat->data_device.dnd_data_source;
 
-  if (seat->pointer->button_count == 0 &&
-      (!meta_wayland_drag_grab_get_focus ((MetaWaylandDragGrab *) grab) ||
+  if (__builtin_popcount (clutter_event_get_state (event) &
+                          (CLUTTER_BUTTON1_MASK |
+                           CLUTTER_BUTTON2_MASK |
+                           CLUTTER_BUTTON3_MASK |
+                           CLUTTER_BUTTON4_MASK |
+                           CLUTTER_BUTTON5_MASK)) <= 1 &&
+      (!meta_wayland_drag_grab_get_focus (drag_grab) ||
        meta_wayland_data_source_get_current_action (data_source) ==
        WL_DATA_DEVICE_MANAGER_DND_ACTION_NONE))
     meta_xwayland_end_dnd_grab (&seat->data_device, FALSE);
+
+  return CLUTTER_EVENT_PROPAGATE;
 }
 
-static const MetaWaylandPointerGrabInterface drag_xgrab_interface = {
+static gboolean
+drag_xgrab_key (MetaWaylandEventHandler *handler,
+                const ClutterEvent      *event,
+                gpointer                 user_data)
+{
+  return CLUTTER_EVENT_PROPAGATE;
+}
+
+static gboolean
+drag_xgrab_ignore_event (MetaWaylandEventHandler *handler,
+                         const ClutterEvent      *event,
+                         gpointer                 user_data)
+{
+  return CLUTTER_EVENT_STOP;
+}
+
+static const MetaWaylandEventInterface xdnd_event_interface = {
+  drag_xgrab_get_focus_surface,
   drag_xgrab_focus,
   drag_xgrab_motion,
-  drag_xgrab_button,
+  drag_xgrab_ignore_event, /* press */
+  drag_xgrab_release,
+  drag_xgrab_key,
+  drag_xgrab_ignore_event, /* other */
 };
 
 static gboolean
@@ -975,13 +1052,17 @@ meta_xwayland_dnd_handle_client_message (MetaWaylandCompositor *compositor,
         }
       else if (event->message_type == xdnd_atoms[ATOM_DND_POSITION])
         {
+          ClutterInputDevice *device;
+          ClutterEventSequence *sequence;
           graphene_point_t pos;
           uint32_t action = 0;
 
           dnd->client_message_timestamp = event->data.l[3];
 
-          clutter_seat_query_state (clutter_input_device_get_seat (seat->pointer->device),
-                                    seat->pointer->device, NULL, &pos, NULL);
+          device = meta_wayland_drag_grab_get_device (drag_grab, &sequence);
+
+          clutter_seat_query_state (clutter_input_device_get_seat (device),
+                                    device, sequence, &pos, NULL);
 
           action = atom_to_action ((Atom) event->data.l[4]);
           meta_wayland_data_source_set_user_action (dnd->source, action);
@@ -1011,33 +1092,77 @@ meta_xwayland_dnd_handle_client_message (MetaWaylandCompositor *compositor,
 }
 
 static gboolean
+find_dnd_candidate_device (ClutterStage         *stage,
+                           ClutterInputDevice   *device,
+                           ClutterEventSequence *sequence,
+                           gpointer              user_data)
+{
+  DndCandidateDevice *candidate = user_data;
+  graphene_point_t pos;
+  ClutterModifierType modifiers;
+  MetaWaylandSurface *focus;
+
+  clutter_seat_query_state (clutter_input_device_get_seat (device),
+                            device, sequence, &pos, &modifiers);
+
+  if (!sequence)
+    {
+      if (modifiers &
+          (CLUTTER_BUTTON1_MASK | CLUTTER_BUTTON2_MASK |
+           CLUTTER_BUTTON3_MASK | CLUTTER_BUTTON4_MASK |
+           CLUTTER_BUTTON5_MASK))
+        return TRUE;
+    }
+
+  focus = meta_wayland_seat_get_current_surface (candidate->seat,
+                                                 device, sequence);
+  if (!focus || !meta_wayland_surface_is_xwayland (focus))
+    return TRUE;
+
+  candidate->device = device;
+  candidate->sequence = sequence;
+  candidate->pos = pos;
+  candidate->focus = focus;
+
+  return FALSE;
+}
+
+static gboolean
 meta_xwayland_dnd_handle_xfixes_selection_notify (MetaWaylandCompositor *compositor,
                                                   XEvent                *xevent)
 {
   XFixesSelectionNotifyEvent *event = (XFixesSelectionNotifyEvent *) xevent;
   MetaXWaylandDnd *dnd = compositor->xwayland_manager.dnd;
-  MetaWaylandDataDevice *data_device = &compositor->seat->data_device;
+  MetaWaylandSeat *seat = compositor->seat;
+  MetaWaylandDataDevice *data_device = &seat->data_device;
   MetaX11Display *x11_display = x11_display_from_dnd (dnd);
-  MetaWaylandSurface *focus;
+  MetaContext *context = meta_wayland_compositor_get_context (compositor);
+  MetaBackend *backend = meta_context_get_backend (context);
+  ClutterStage *stage = CLUTTER_STAGE (meta_backend_get_stage (backend));
+  DndCandidateDevice candidate = { seat, };
 
   if (event->selection != xdnd_atoms[ATOM_DND_SELECTION])
     return FALSE;
 
   dnd->owner = event->owner;
-  focus = compositor->seat->pointer->focus_surface;
 
   if (event->owner != None && event->owner != x11_display->selection.xwindow &&
-      focus && meta_wayland_surface_is_xwayland (focus))
+      !clutter_stage_pointing_input_foreach (stage, find_dnd_candidate_device,
+                                             &candidate))
     {
+
       dnd->source = meta_wayland_data_source_xwayland_new (dnd, compositor);
       meta_wayland_data_device_set_dnd_source (&compositor->seat->data_device,
                                                dnd->source);
 
       meta_wayland_data_device_start_drag (data_device,
-                                           wl_resource_get_client (focus->resource),
-                                           &drag_xgrab_interface,
-                                           focus, dnd->source,
-                                           NULL);
+                                           wl_resource_get_client (candidate.focus->resource),
+                                           &xdnd_event_interface,
+                                           candidate.focus, dnd->source,
+                                           NULL,
+                                           candidate.device,
+                                           candidate.sequence,
+                                           candidate.pos);
     }
   else if (event->owner == None)
     {

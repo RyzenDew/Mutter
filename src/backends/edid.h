@@ -88,8 +88,6 @@ struct _MetaEdidInfo
   char *dsc_serial_number;
   char *dsc_product_name;
 
-  int32_t min_vert_rate_hz;
-
   MetaEdidColorimetry colorimetry;
   MetaEdidHdrStaticMetadata hdr_static_metadata;
 };
