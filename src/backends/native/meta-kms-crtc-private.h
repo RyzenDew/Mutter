@@ -28,8 +28,15 @@ typedef enum _MetaKmsCrtcProp
   META_KMS_CRTC_PROP_ACTIVE,
   META_KMS_CRTC_PROP_GAMMA_LUT,
   META_KMS_CRTC_PROP_GAMMA_LUT_SIZE,
+  META_KMS_CRTC_PROP_VRR_ENABLED,
   META_KMS_CRTC_N_PROPS
 } MetaKmsCrtcProp;
+
+typedef enum _MetaKmsCrtcVrr
+{
+  META_KMS_CRTC_VRR_DISABLED = 0,
+  META_KMS_CRTC_VRR_ENABLED,
+} MetaKmsCrtcVrr;
 
 MetaKmsCrtc * meta_kms_crtc_new (MetaKmsImplDevice  *impl_device,
                                  drmModeCrtc        *drm_crtc,

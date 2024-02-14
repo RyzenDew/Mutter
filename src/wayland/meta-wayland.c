@@ -396,10 +396,7 @@ void
 meta_wayland_compositor_update (MetaWaylandCompositor *compositor,
                                 const ClutterEvent    *event)
 {
-  if (meta_wayland_tablet_manager_consumes_event (compositor->tablet_manager, event))
-    meta_wayland_tablet_manager_update (compositor->tablet_manager, event);
-  else
-    meta_wayland_seat_update (compositor->seat, event);
+  meta_wayland_seat_update (compositor->seat, event);
 }
 
 static MetaWaylandOutput *
@@ -472,10 +469,6 @@ gboolean
 meta_wayland_compositor_handle_event (MetaWaylandCompositor *compositor,
                                       const ClutterEvent    *event)
 {
-  if (meta_wayland_tablet_manager_handle_event (compositor->tablet_manager,
-                                                event))
-    return TRUE;
-
   return meta_wayland_seat_handle_event (compositor->seat, event);
 }
 
@@ -618,7 +611,6 @@ meta_wayland_compositor_finalize (GObject *object)
   meta_wayland_activation_finalize (compositor);
   meta_wayland_outputs_finalize (compositor);
   meta_wayland_presentation_time_finalize (compositor);
-  meta_wayland_tablet_manager_finalize (compositor);
 
   g_hash_table_destroy (compositor->scheduled_surface_associations);
 
@@ -630,6 +622,7 @@ meta_wayland_compositor_finalize (GObject *object)
   g_clear_object (&compositor->dma_buf_manager);
 
   g_clear_pointer (&compositor->seat, meta_wayland_seat_free);
+  meta_wayland_tablet_manager_finalize (compositor);
 
   g_clear_pointer (&priv->filter_manager, meta_wayland_filter_manager_free);
   g_clear_pointer (&priv->frame_callback_sources, g_hash_table_destroy);
@@ -1037,12 +1030,6 @@ meta_wayland_compositor_get_context (MetaWaylandCompositor *compositor)
   return compositor->context;
 }
 
-gboolean
-meta_wayland_compositor_is_grabbed (MetaWaylandCompositor *compositor)
-{
-  return meta_wayland_seat_is_grabbed (compositor->seat);
-}
-
 /**
  * meta_wayland_compositor_get_wayland_display:
  * @compositor: The #MetaWaylandCompositor
@@ -1074,19 +1061,13 @@ static void
 meta_wayland_compositor_update_focus (MetaWaylandCompositor *compositor,
                                       MetaWindow            *window)
 {
-  MetaContext *context = meta_wayland_compositor_get_context (compositor);
-  MetaDisplay *display = meta_context_get_display (context);
   MetaWindow *focus_window = NULL;
 
   /* Compositor not ready yet */
   if (!compositor->seat)
     return;
 
-  if (!display || !meta_display_windows_are_interactable (display))
-    focus_window = NULL;
-  else if (!window)
-    focus_window = NULL;
-  else if (window && meta_window_get_wayland_surface (window))
+  if (window && meta_window_get_wayland_surface (window))
     focus_window = window;
   else
     meta_topic (META_DEBUG_FOCUS, "Focus change has no effect, because there is no matching wayland surface");

@@ -1,3 +1,4 @@
+DRIVERS=="i915", SUBSYSTEM=="drm", TAG+="mutter-device-disable-vrr"
 DRIVERS=="i915", SUBSYSTEM=="drm", ATTRS{vendor}=="0x8086", ATTRS{device}=="0x1602", TAG+="mutter-device-disable-kms-modifiers"
 DRIVERS=="i915", SUBSYSTEM=="drm", ATTRS{vendor}=="0x8086", ATTRS{device}=="0x1606", TAG+="mutter-device-disable-kms-modifiers"
 DRIVERS=="i915", SUBSYSTEM=="drm", ATTRS{vendor}=="0x8086", ATTRS{device}=="0x160a", TAG+="mutter-device-disable-kms-modifiers"

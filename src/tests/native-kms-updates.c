@@ -116,6 +116,7 @@ meta_test_kms_update_sanity (void)
   g_assert_null (meta_kms_update_get_mode_sets (update));
   g_assert_null (meta_kms_update_get_page_flip_listeners (update));
   g_assert_null (meta_kms_update_get_connector_updates (update));
+  g_assert_null (meta_kms_update_get_crtc_updates (update));
   g_assert_null (meta_kms_update_get_crtc_color_updates (update));
   meta_kms_update_free (update);
 }
@@ -449,6 +450,8 @@ meta_test_kms_update_merge (void)
   MetaKmsModeSet *mode_set;
   GList *plane_assignments;
   MetaKmsPlaneAssignment *plane_assignment;
+  GList *crtc_updates;
+  MetaKmsCrtcUpdate *crtc_update;
   GList *crtc_color_updates;
   MetaKmsCrtcColorUpdate *crtc_color_update;
   MetaGammaLut *crtc_gamma;
@@ -495,6 +498,10 @@ meta_test_kms_update_merge (void)
                                   META_KMS_ASSIGN_PLANE_FLAG_NONE);
   meta_kms_plane_assignment_set_cursor_hotspot (cursor_plane_assignment,
                                                 10, 11);
+
+  meta_kms_update_set_vrr (update1,
+                           crtc,
+                           TRUE);
 
   meta_kms_update_set_underscanning (update1,
                                      connector,
@@ -595,6 +602,14 @@ meta_test_kms_update_merge (void)
   g_assert_cmpint (plane_assignment->dst_rect.y, ==, 56);
   g_assert_cmpint (plane_assignment->dst_rect.width, ==, 64);
   g_assert_cmpint (plane_assignment->dst_rect.height, ==, 64);
+
+  crtc_updates = meta_kms_update_get_crtc_updates (update1);
+  g_assert_cmpuint (g_list_length (crtc_updates), ==, 1);
+  crtc_update = crtc_updates->data;
+  g_assert_nonnull (crtc_update);
+
+  g_assert_true (crtc_update->vrr.has_update);
+  g_assert_true (crtc_update->vrr.is_enabled);
 
   crtc_color_updates = meta_kms_update_get_crtc_color_updates (update1);
   g_assert_cmpuint (g_list_length (crtc_color_updates), ==, 1);
